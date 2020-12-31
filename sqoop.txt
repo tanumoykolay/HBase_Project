@@ -1,1 +1,61 @@
+Step 1: Create a folder in hdfs hbase_project
 
+hdfs dfs -mkdir /user/tanumoy_kolay/hbase_project
+
+Step 2: Import the 2 tables from mysql to hdfs
+
+sqoop import --connect "jdbc:mysql://nn01.itversity.com:3306/retail_export" --username retail_dba --password itversity --table orders_tan --split-by order_id --warehouse-dir /user/tanumoy_kolay/hbase_project
+
+sqoop import --connect "jdbc:mysql://nn01.itversity.com:3306/retail_export" --username retail_dba --password itversity --table customers --warehouse-dir /user/tanumoy_kolay/hbase_project
+
+Step 3: Create a database in hive
+
+hive> set hive.metastore.warehouse.dir = /user/tanumoy_kolay/warehouse;
+hive> create database tan;
+
+Step 4:for creating table with schema of mysql table
+
+sqoop create-hive-table \
+--connect "jdbc:mysql://nn01.itversity.com:3306/retail_export" \
+--username retail_dba \
+--password itversity \
+--table orders_tan \
+--hive-table tan.hive_orders_tan \
+--fields-terminated-by ','
+
+[tanumoy_kolay@gw02 ~]$ sqoop create-hive-table --connect "jdbc:mysql://nn01.itversity.com:3306/retail_export" --username retail_dba --password itversity --table customers --hive-table tan.hive_customers --fields-terminated-by ','
+
+Step 5: Check whether hive tables are created
+
+hive> use tan;
+hive> show tables;
+
+Step 6: Load data from hdfs path to hive tables
+
+hive> load data inpath '/user/tanumoy_kolay/hbase_project/orders_tan' into table tan.hive_orders_tan;
+hive> load data inpath '/user/tanumoy_kolay/hbase_project/customers' into table tan.hive_customers;
+
+Step 7: Create a hbase table on top of the hive tables
+
+create table tan_hbase_tbl(customer_id int,customer_fname string,customer_lname string,order_id int,order_date string) STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler' with SERDEPROPERTIES('hbase.columns.mapping'=':key,personal:customer_fname,personal:customer_lname,personal:order_id,personal:order_date');
+
+Step 8: Insert data from the hive tables into the hbase table
+
+hive> insert overwrite table tan_hbase_tbl SELECT c.cust_id,c.cust_name,c.cust_name,o.order_id,o.order_date from hive_customers c join hive_orders_tan o on c.cust_id=o.order_customer_id;
+
+Output:--------------
+
+hive> select * from tan_hbase_tbl where customer_id=10003;
+OK
+10003   Wascals Wascals 31736   2014-02-06 00:00:00.0
+Time taken: 0.948 seconds, Fetched: 1 row(s)
+
+hbase(main):004:0> get 'tan.tan_hbase_tbl', 10003
+COLUMN                              CELL                                                                                                 
+ personal:customer_fname            timestamp=1609076070356, value=Wascals                                                               
+ personal:customer_lname            timestamp=1609076070356, value=Wascals                                                               
+ personal:order_date                timestamp=1609076070356, value=2014-02-06 00:00:00.0                                                 
+ personal:order_id                  timestamp=1609076070356, value=31736                                                                 
+4 row(s) in 0.1530 seconds
+
+---conclusion-check the speed---------------------------------------
